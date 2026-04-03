@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pdf
+*.png
+*.xlsx
+events_*.json
+events_scraped.json
+/tmp/
+.DS_Store
