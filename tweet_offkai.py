@@ -19,6 +19,7 @@ Usage:
 
 import asyncio
 import json
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -296,6 +297,83 @@ def exclude_calendar_duplicates(tweet_events: list, calendar_events: list) -> li
 
 
 # ─────────────────────────────────────────────────────────
+# つぶやき本文からオフ会情報を推測抽出
+# ─────────────────────────────────────────────────────────
+def extract_event_info(body: str) -> dict:
+    """つぶやき本文から オフ会名・開催日時・場所 を正規表現で推測抽出する"""
+
+    # ── オフ会名 ─────────────────────────────────────────
+    # 優先順: 【】『』「」内 → 最初の行
+    event_name = "—"
+    bracket = re.search(r'[【〔「『]([^】〕」』\n]{2,40})[】〕」』]', body)
+    if bracket:
+        event_name = bracket.group(1).strip()
+    else:
+        first = body.split('\n')[0].strip()
+        if len(first) >= 3:
+            event_name = first[:50]
+
+    # ── 開催日時 ──────────────────────────────────────────
+    # パターン例: 4月5日（土）10:00 / 4/5(土)10時 / 2026年4月5日 など
+    event_datetime = "—"
+    dt_patterns = [
+        # 〇月〇日（曜）〇時〇〇分 / 〇:〇〇
+        r'\d{1,2}月\d{1,2}日[（(][月火水木金土日][）)][\s　]*\d{1,2}[時:：]\d{2}',
+        r'\d{1,2}月\d{1,2}日[（(][月火水木金土日][）)][\s　]*\d{1,2}時',
+        r'\d{1,2}月\d{1,2}日[（(][月火水木金土日][）)]',
+        # 〇/〇（曜）〇:〇〇
+        r'\d{1,2}/\d{1,2}[（(][月火水木金土日][）)][\s　]*\d{1,2}:\d{2}',
+        r'\d{1,2}/\d{1,2}[（(][月火水木金土日][）)]',
+        # 〇月〇日 〇:〇〇
+        r'\d{1,2}月\d{1,2}日[\s　]+\d{1,2}:\d{2}',
+        r'\d{1,2}月\d{1,2}日',
+        # YYYY年M月D日
+        r'\d{4}年\d{1,2}月\d{1,2}日',
+    ]
+    for pat in dt_patterns:
+        m = re.search(pat, body)
+        if m:
+            event_datetime = m.group(0).strip()
+            break
+
+    # ── 場所 ──────────────────────────────────────────────
+    # 「会場：〇〇」「場所：〇〇」パターン → なければツールから推定
+    venue = "—"
+    venue_label = re.search(
+        r'(?:会場|場所|開催地|開催場所|開催地)[：:・]\s*([^\n　]{2,30})', body
+    )
+    if venue_label:
+        venue = venue_label.group(1).strip()[:30]
+    else:
+        lower = body.lower()
+        if 'zoom' in lower:
+            venue = 'Zoom'
+        elif 'ovice' in lower:
+            venue = 'OVice'
+        elif 'discord' in lower:
+            venue = 'Discord'
+        elif 'google meet' in lower:
+            venue = 'Google Meet'
+        elif 'teams' in lower:
+            venue = 'Teams'
+        elif 'オンライン' in lower or 'online' in lower:
+            venue = 'オンライン'
+        elif 'オフライン' in lower or '現地' in lower:
+            # 「〇〇会場」「〇〇ビル」「〇〇カフェ」などを探す
+            loc = re.search(r'[\u30A0-\u30FF\u3040-\u309F\u4E00-\u9FFF]{2,12}(?:ビル|タワー|センター|ホール|カフェ|オフィス|スペース|会館|施設)', body)
+            if loc:
+                venue = loc.group(0)
+            else:
+                venue = 'オフライン'
+
+    return {
+        "event_name":     event_name,
+        "event_datetime": event_datetime,
+        "venue":          venue,
+    }
+
+
+# ─────────────────────────────────────────────────────────
 # HTML 生成（つぶやきURL付き）
 # ─────────────────────────────────────────────────────────
 def build_html(events: List[dict], generated_at: datetime,
@@ -304,27 +382,33 @@ def build_html(events: List[dict], generated_at: datetime,
 
     rows = ""
     for i, ev in enumerate(events, 1):
-        bg         = "#f8f9ff" if i % 2 == 0 else "#ffffff"
-        fmt        = ev.get("format") or "—"
-        fmt_class  = {"オンライン": "online", "オフライン": "offline"}.get(fmt, "unknown")
-        title      = ev.get("title") or "（タイトル不明）"
-        url        = ev.get("url") or ""
-        body       = (ev.get("tweetBody") or "").replace("\n", "<br>")
-        date_str   = ev.get("date") or "—"
-        time_str   = ev.get("time") or ""
-        organizer  = ev.get("organizer") or "—"
-        tweet_link = (f'<a href="{url}" class="tweet-link" target="_blank">🔗 つぶやきを見る</a>'
-                      if url else "—")
-        title_link = (f'<a href="{url}" class="ev-link" target="_blank">{title}</a>'
-                      if url else title)
+        bg        = "#f8f9ff" if i % 2 == 0 else "#ffffff"
+        url       = ev.get("url") or ""
+        body_raw  = ev.get("tweetBody") or ""
+        body      = body_raw.replace("\n", "<br>")
+        date_str  = ev.get("date") or "—"
+        time_str  = ev.get("time") or ""
+        organizer = ev.get("organizer") or "—"
+
+        # つぶやき本文からオフ会情報を抽出
+        info = extract_event_info(body_raw)
+        event_name = info["event_name"]
+        event_dt   = info["event_datetime"]
+        venue      = info["venue"]
+
+        tweet_link  = (f'<a href="{url}" class="tweet-link" target="_blank">🔗 つぶやきを見る</a>'
+                       if url else "—")
+        name_link   = (f'<a href="{url}" class="ev-link" target="_blank">{event_name}</a>'
+                       if url else event_name)
 
         rows += f"""
         <tr style="background:{bg}">
           <td class="num">{i}</td>
           <td class="dt">{date_str} {time_str}</td>
           <td class="org">{organizer}</td>
-          <td class="fmt"><span class="badge {fmt_class}">{fmt}</span></td>
-          <td class="title">{title_link}</td>
+          <td class="evname">{name_link}</td>
+          <td class="evdt">{event_dt}</td>
+          <td class="venue">{venue}</td>
           <td class="body">{body}</td>
           <td class="link">{tweet_link}</td>
         </tr>"""
@@ -361,20 +445,17 @@ body {{
 table {{ width:100%; border-collapse:collapse; box-shadow:0 2px 12px rgba(0,0,0,0.07); }}
 thead tr {{ background:#1a1a2e; color:#fff; }}
 thead th {{ padding:9px 8px; text-align:left; font-size:11px; font-weight:700; white-space:nowrap; }}
-th.num, td.num {{ text-align:center; width:30px; }}
-td.dt   {{ white-space:nowrap; width:120px; color:#555; font-size:11px; }}
-td.org  {{ width:140px; color:#333; font-size:11px; word-break:break-all; }}
-td.fmt  {{ text-align:center; width:76px; }}
-td.title {{ font-weight:600; color:#1a1a2e; width:200px; word-break:break-all; }}
-td.body  {{ font-size:11px; color:#444; line-height:1.65; word-break:break-all; }}
-td.link  {{ width:110px; text-align:center; }}
-tbody td {{ padding:8px 8px; border-bottom:1px solid #eee; vertical-align:top; }}
+th.num, td.num {{ text-align:center; width:28px; }}
+td.dt    {{ white-space:nowrap; width:100px; color:#777; font-size:10px; }}
+td.org   {{ width:100px; color:#333; font-size:11px; word-break:break-all; }}
+td.evname {{ font-weight:700; color:#1a1a2e; width:180px; word-break:break-all; font-size:11px; }}
+td.evdt  {{ white-space:nowrap; width:130px; color:#c05000; font-size:11px; font-weight:600; }}
+td.venue {{ width:110px; color:#166534; font-size:11px; font-weight:600; word-break:break-all; }}
+td.body  {{ font-size:10px; color:#444; line-height:1.6; word-break:break-all; }}
+td.link  {{ width:100px; text-align:center; }}
+tbody td {{ padding:7px 8px; border-bottom:1px solid #eee; vertical-align:top; }}
 tbody tr:last-child td {{ border-bottom:none; }}
 tbody tr:hover {{ background:#fff3e0 !important; }}
-.badge {{ display:inline-block; padding:2px 8px; border-radius:12px; font-size:10px; font-weight:700; white-space:nowrap; }}
-.badge.online  {{ background:#dbeafe; color:#1d4ed8; }}
-.badge.offline {{ background:#dcfce7; color:#166534; }}
-.badge.unknown {{ background:#f3f4f6; color:#6b7280; }}
 a.ev-link    {{ color:#1a1a2e; text-decoration:underline; word-break:break-all; }}
 a.tweet-link {{ display:inline-block; padding:3px 8px; background:#fff3e0; border:1px solid #ffcc80;
                 border-radius:12px; color:#e65100; text-decoration:none; font-size:10px; font-weight:700; white-space:nowrap; }}
@@ -407,9 +488,10 @@ a.tweet-link:hover {{ background:#ffe0b2; }}
     <tr>
       <th class="num">#</th>
       <th>投稿日時</th>
-      <th>投稿者</th>
-      <th class="fmt">形式</th>
-      <th>タイトル（1行目）</th>
+      <th>開催者名</th>
+      <th>オフ会名</th>
+      <th>開催日時</th>
+      <th>場所</th>
       <th>つぶやき本文</th>
       <th>参照元</th>
     </tr>
