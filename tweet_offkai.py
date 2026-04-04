@@ -304,7 +304,7 @@ def extract_event_info(body: str) -> dict:
 
     # ── オフ会名 ─────────────────────────────────────────
     # 優先順: 【】『』「」内 → 最初の行
-    event_name = "—"
+    event_name = "不明"
     bracket = re.search(r'[【〔「『]([^】〕」』\n]{2,40})[】〕」』]', body)
     if bracket:
         event_name = bracket.group(1).strip()
@@ -315,7 +315,7 @@ def extract_event_info(body: str) -> dict:
 
     # ── 開催日時 ──────────────────────────────────────────
     # パターン例: 4月5日（土）10:00 / 4/5(土)10時 / 2026年4月5日 など
-    event_datetime = "—"
+    event_datetime = "不明"
     dt_patterns = [
         # 〇月〇日（曜）〇時〇〇分 / 〇:〇〇
         r'\d{1,2}月\d{1,2}日[（(][月火水木金土日][）)][\s　]*\d{1,2}[時:：]\d{2}',
@@ -338,7 +338,7 @@ def extract_event_info(body: str) -> dict:
 
     # ── 場所 ──────────────────────────────────────────────
     # 「会場：〇〇」「場所：〇〇」パターン → なければツールから推定
-    venue = "—"
+    venue = "不明"
     venue_label = re.search(
         r'(?:会場|場所|開催地|開催場所|開催地)[：:・]\s*([^\n　]{2,30})', body
     )
