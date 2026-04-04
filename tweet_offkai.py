@@ -303,15 +303,46 @@ def extract_event_info(body: str) -> dict:
     """つぶやき本文から オフ会名・開催日時・場所 を正規表現で推測抽出する"""
 
     # ── オフ会名 ─────────────────────────────────────────
-    # 優先順: 【】『』「」内 → 最初の行
+    # 優先順:
+    #   1. 【】『』内のテキスト
+    #   2. 「〇〇オフ会」「〇〇勉強会」などイベント系キーワードを含む名称
+    #   3. 「タイトル：」「イベント名：」などラベルの後のテキスト
+    #   4. 「〇〇を開催」「〇〇やります」の前のイベント名
+    #   → 読み取れなければ「不明」
     event_name = "不明"
-    bracket = re.search(r'[【〔「『]([^】〕」』\n]{2,40})[】〕」』]', body)
+
+    # 1. 【】『』内
+    bracket = re.search(r'[【〔『]([^】〕』\n]{2,40})[】〕』]', body)
     if bracket:
         event_name = bracket.group(1).strip()
-    else:
-        first = body.split('\n')[0].strip()
-        if len(first) >= 3:
-            event_name = first[:50]
+
+    if event_name == "不明":
+        # 2. 〇〇オフ会 / 〇〇勉強会 / 〇〇もくもく会 などのパターン
+        #    前方に2〜20文字の名称 + イベント系語尾
+        ev_suffix = (r'(?:オフ会|ミートアップ|[Mm]eetup|勉強会|もくもく会|'
+                     r'交流会|懇親会|ワークショップ|[Ww]orkshop|読書会|座談会)')
+        m = re.search(
+            rf'([\w\u3040-\u30FF\u4E00-\u9FFFa-zA-Z]{{1,20}}{ev_suffix})',
+            body
+        )
+        if m:
+            event_name = m.group(1).strip()
+
+    if event_name == "不明":
+        # 3. 「タイトル：」「イベント名：」ラベルの後
+        m = re.search(r'(?:タイトル|イベント名|オフ会名|会名)[：:]\s*([^\n]{3,40})', body)
+        if m:
+            event_name = m.group(1).strip()
+
+    if event_name == "不明":
+        # 4. 「〇〇を開催」「〇〇やります」「〇〇します」の前の名詞句
+        m = re.search(
+            r'([\u3040-\u30FF\u4E00-\u9FFFa-zA-Z][\w\u3040-\u30FF\u4E00-\u9FFF]{1,20})'
+            r'(?:を開催|やります|します|開催します|開催予定)',
+            body
+        )
+        if m:
+            event_name = m.group(1).strip()
 
     # ── 開催日時 ──────────────────────────────────────────
     # パターン例: 4月5日（土）10:00 / 4/5(土)10時 / 2026年4月5日 など
