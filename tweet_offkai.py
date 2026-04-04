@@ -435,13 +435,13 @@ def build_html(events: List[dict], generated_at: datetime,
         rows += f"""
         <tr style="background:{bg}">
           <td class="num">{i}</td>
-          <td class="dt">{date_str} {time_str}</td>
+          <td class="evdt">{event_dt}</td>
           <td class="org">{organizer}</td>
           <td class="evname">{name_link}</td>
-          <td class="evdt">{event_dt}</td>
           <td class="venue">{venue}</td>
           <td class="body">{body}</td>
           <td class="link">{tweet_link}</td>
+          <td class="dt">{date_str} {time_str}</td>
         </tr>"""
 
     return f"""<!DOCTYPE html>
@@ -518,13 +518,13 @@ a.tweet-link:hover {{ background:#ffe0b2; }}
   <thead>
     <tr>
       <th class="num">#</th>
-      <th>投稿日時</th>
+      <th>開催日時</th>
       <th>開催者名</th>
       <th>オフ会名</th>
-      <th>開催日時</th>
       <th>場所</th>
       <th>つぶやき本文</th>
       <th>参照元</th>
+      <th>投稿日時</th>
     </tr>
   </thead>
   <tbody>{rows}
@@ -537,6 +537,111 @@ a.tweet-link:hover {{ background:#ffe0b2; }}
 
 # ─────────────────────────────────────────────────────────
 # PDF / PNG レンダリング
+# ─────────────────────────────────────────────────────────
+# Excel 出力
+# ─────────────────────────────────────────────────────────
+def build_excel(events: List[dict], generated_at: datetime,
+                start_date: str, end_date: str, stem: str):
+    from openpyxl import Workbook
+    from openpyxl.styles import (Font, PatternFill, Alignment,
+                                  Border, Side, numbers)
+    from openpyxl.utils import get_column_letter
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "つぶやきオフ会"
+
+    # ── ヘッダー行 ──
+    headers = ["#", "開催日時", "開催者名", "オフ会名", "場所",
+               "つぶやき本文", "参照元URL", "投稿日時"]
+    header_fill  = PatternFill("solid", fgColor="1A1A2E")
+    header_font  = Font(bold=True, color="FFFFFF", size=10)
+    center_align = Alignment(horizontal="center", vertical="top", wrap_text=False)
+    top_align    = Alignment(vertical="top", wrap_text=True)
+    thin         = Side(style="thin", color="DDDDDD")
+    border       = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill   = header_fill
+        cell.font   = header_font
+        cell.alignment = center_align
+        cell.border = border
+
+    # ── データ行 ──
+    even_fill = PatternFill("solid", fgColor="F8F9FF")
+    odd_fill  = PatternFill("solid", fgColor="FFFFFF")
+    evdt_font = Font(bold=True, color="C05000", size=10)
+    name_font = Font(bold=True, color="1A1A2E", size=10)
+
+    for i, ev in enumerate(events, 1):
+        body_raw  = ev.get("tweetBody") or ""
+        date_str  = ev.get("date") or ""
+        time_str  = ev.get("time") or ""
+        organizer = ev.get("organizer") or "—"
+        url       = ev.get("url") or ""
+
+        info       = extract_event_info(body_raw)
+        event_name = info["event_name"]
+        event_dt   = info["event_datetime"]
+        venue      = info["venue"]
+
+        row_data = [
+            i,
+            event_dt,
+            organizer,
+            event_name,
+            venue,
+            body_raw,
+            url,
+            f"{date_str} {time_str}".strip(),
+        ]
+        fill = even_fill if i % 2 == 0 else odd_fill
+        row  = i + 1  # 1行目がヘッダー
+
+        for col, val in enumerate(row_data, 1):
+            cell = ws.cell(row=row, column=col, value=val)
+            cell.fill      = fill
+            cell.border    = border
+            cell.alignment = top_align
+            cell.font      = Font(size=10)
+
+        # 開催日時・オフ会名に色付き太字
+        ws.cell(row=row, column=2).font = evdt_font
+        ws.cell(row=row, column=4).font = name_font
+
+        # 参照元URLにハイパーリンク
+        if url:
+            link_cell = ws.cell(row=row, column=7)
+            link_cell.hyperlink = url
+            link_cell.value     = "🔗 つぶやきを見る"
+            link_cell.font      = Font(color="E65100", underline="single", size=10)
+
+    # ── 列幅 ──
+    col_widths = [4, 18, 14, 28, 14, 60, 18, 14]
+    for col, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(col)].width = w
+
+    # 本文列は折り返し表示・行の高さは自動
+    ws.row_dimensions[1].height = 18
+    for row in range(2, len(events) + 2):
+        ws.row_dimensions[row].height = 60
+
+    # ── メタ情報シート ──
+    ws_meta = wb.create_sheet("生成情報")
+    ws_meta.append(["生成日時", generated_at.strftime("%Y/%m/%d %H:%M")])
+    ws_meta.append(["対象期間", f"{start_date} ～ {end_date}"])
+    ws_meta.append(["件数", len(events)])
+    ws_meta.append(["備考", "カレンダー未掲載のつぶやきオフ会のみ。キーワード自動判定のため誤検知あり。"])
+
+    xlsx_path = OUTPUT_DIR / (stem + ".xlsx")
+    wb.save(str(xlsx_path))
+    print(f"  📊 Excel: {xlsx_path}")
+    return xlsx_path
+
+
 # ─────────────────────────────────────────────────────────
 def render(html: str, stem: str):
     from playwright.sync_api import sync_playwright
@@ -657,11 +762,12 @@ def main():
         json.dump(unique_tweets, f, ensure_ascii=False, indent=2)
     print(f"  💾 JSON: {result_path}")
 
-    # ── Step 4: PDF / PNG 出力 ────────────────────────────
-    print(f"\n[Step 4] PDF / PNG を出力中...")
+    # ── Step 4: PDF / PNG / Excel 出力 ───────────────────
+    print(f"\n[Step 4] PDF / PNG / Excel を出力中...")
     html = build_html(unique_tweets, now, start_str, end_str)
     stem = f"{date_prefix}_{keyword}_つぶやきオフ会（カレンダー未掲載）"
     render(html, stem)
+    build_excel(unique_tweets, now, start_str, end_str, stem)
 
     # ── サマリー ──────────────────────────────────────────
     print("\n" + "=" * 60)
@@ -670,6 +776,7 @@ def main():
     print(f"   出力ファイル:")
     print(f"     {stem}.pdf")
     print(f"     {stem}.png")
+    print(f"     {stem}.xlsx")
     print("=" * 60)
 
 
