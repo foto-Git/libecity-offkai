@@ -469,16 +469,24 @@ def main():
     start_date = now
     end_date   = now + timedelta(days=31)
     keyword    = "claude"
+    from_json_path = None   # --from-json <path> で事前収集済みJSONを指定
 
-    if len(sys.argv) >= 3:
+    # --from-json を先に抜き出す
+    raw_args = sys.argv[1:]
+    if "--from-json" in raw_args:
+        idx = raw_args.index("--from-json")
+        from_json_path = raw_args[idx + 1]
+        raw_args = raw_args[:idx] + raw_args[idx + 2:]
+
+    if len(raw_args) >= 2:
         try:
-            start_date = datetime.fromisoformat(sys.argv[1])
-            end_date   = datetime.fromisoformat(sys.argv[2])
+            start_date = datetime.fromisoformat(raw_args[0])
+            end_date   = datetime.fromisoformat(raw_args[1])
         except ValueError:
             print("日付形式エラー。YYYY-MM-DD で指定してください。")
             sys.exit(1)
-    if len(sys.argv) >= 4:
-        keyword = sys.argv[3]
+    if len(raw_args) >= 3:
+        keyword = raw_args[2]
 
     start_iso    = start_date.strftime("%Y-%m-%dT00:00:00Z")
     end_iso      = end_date.strftime("%Y-%m-%dT23:59:59Z")
@@ -490,11 +498,22 @@ def main():
     print("🐦 リベシティ つぶやきオフ会収集システム")
     print(f"   対象期間: {start_str} ～ {end_str}")
     print(f"   キーワード: {keyword}")
+    if from_json_path:
+        print(f"   モード: JSONファイルから読み込み")
     print("=" * 60)
 
     # ── Step 1: つぶやき収集 ──────────────────────────────
     print("\n[Step 1] つぶやきを収集中...")
-    tweet_events = asyncio.run(collect_tweets(start_iso, end_iso, keyword))
+    if from_json_path:
+        # Claude が事前に MCP Chrome で取得したJSONを読み込む
+        print(f"  📂 JSONから読み込み: {from_json_path}")
+        with open(from_json_path, encoding="utf-8") as f:
+            data = json.load(f)
+        # make_js() の戻り値形式 {"events": [...]} または生リスト両対応
+        tweet_events = data.get("events", []) if isinstance(data, dict) else data
+        print(f"  ✅ {len(tweet_events)}件読み込み完了")
+    else:
+        tweet_events = asyncio.run(collect_tweets(start_iso, end_iso, keyword))
 
     if not tweet_events:
         print("  ⚠️ オフ会告知ツイートが見つかりませんでした。")
