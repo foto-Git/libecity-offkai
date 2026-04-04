@@ -179,12 +179,31 @@ def make_js(start_iso: str, end_iso: str, keyword: str) -> str:
 # ─────────────────────────────────────────────────────────
 async def collect_tweets(start_iso: str, end_iso: str, keyword: str = "claude") -> list:
     from playwright.async_api import async_playwright
+    import shutil
+    import tempfile
 
     print(f"  📡 Firestore tweets クエリ中... ({start_iso[:10]} ～ {end_iso[:10]}, keyword={keyword})")
 
     chrome_profile = Path.home() / "Library/Application Support/Google/Chrome/Default"
+    js = make_js(start_iso, end_iso, keyword)
+
+    async def _run_in_context(ctx) -> dict:
+        """コンテキストを受け取ってJSを実行し結果を返す"""
+        page = await ctx.new_page()
+        await page.goto("https://libecity.com/mypage/tsubuyaki",
+                        wait_until="domcontentloaded", timeout=30_000)
+        await page.wait_for_timeout(3000)
+        result = await page.evaluate(js)
+        await ctx.close()
+        return result
+
+    result = None
+    tmp_dir = None
 
     async with async_playwright() as p:
+
+        # ── 方法1: システムChromeプロファイルで直接起動 ──────
+        # （Chromeが閉じている場合はこれで動く）
         try:
             ctx = await p.chromium.launch_persistent_context(
                 user_data_dir=str(chrome_profile),
@@ -192,25 +211,57 @@ async def collect_tweets(start_iso: str, end_iso: str, keyword: str = "claude") 
                 args=["--no-sandbox"],
                 channel="chrome",
             )
-        except Exception:
-            ctx = await p.chromium.launch_persistent_context(
-                user_data_dir=str(chrome_profile),
-                headless=False,
-                args=["--no-sandbox"],
-                channel="chrome",
-            )
+            result = await _run_in_context(ctx)
 
-        page = await ctx.new_page()
-        await page.goto("https://libecity.com/mypage/tsubuyaki",
-                        wait_until="domcontentloaded", timeout=30_000)
-        await page.wait_for_timeout(3000)
+        except Exception as e1:
+            print(f"  ⚠️ 直接起動失敗: {type(e1).__name__}")
+            print("  🔄 Chrome起動中のためプロファイルをコピーして再試行中...")
 
-        js     = make_js(start_iso, end_iso, keyword)
-        result = await page.evaluate(js)
-        await ctx.close()
+            # ── 方法2: 認証に必要なファイルだけコピーして起動 ──
+            # Chrome起動中でもプロファイルロックを回避できる
+            tmp_dir = tempfile.mkdtemp(prefix="pw_chrome_")
+            try:
+                dst_profile = Path(tmp_dir) / "Default"
+                dst_profile.mkdir(parents=True)
+
+                # Firebase認証トークンの格納先（IndexedDB）+ Cookie をコピー
+                for item_name in ["IndexedDB", "Cookies", "Local Storage", "Session Storage"]:
+                    src = chrome_profile / item_name
+                    dst = dst_profile / item_name
+                    if not src.exists():
+                        continue
+                    if src.is_dir():
+                        shutil.copytree(
+                            str(src), str(dst),
+                            ignore=shutil.ignore_patterns("*.lock", "LOCK", "lockfile"),
+                        )
+                    else:
+                        shutil.copy2(str(src), str(dst))
+
+                # Playwright内蔵Chromium（channel指定なし）でコピー先を使用
+                ctx = await p.chromium.launch_persistent_context(
+                    user_data_dir=tmp_dir,
+                    headless=True,
+                    args=["--no-sandbox", "--disable-extensions"],
+                )
+                result = await _run_in_context(ctx)
+
+            except Exception as e2:
+                print(f"  ❌ 再試行も失敗: {e2}")
+            finally:
+                if tmp_dir:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    if result is None:
+        print("  ❌ ブラウザの起動に失敗しました。")
+        print("  💡 Chromeを一旦閉じてから再実行するか、以下を確認してください:")
+        print("     - Chromeで https://libecity.com にログイン済みか")
+        print("     - playwright install chromium を実行済みか")
+        return []
 
     if isinstance(result, dict) and result.get("error"):
-        print(f"  ❌ エラー: {result['error']}")
+        print(f"  ❌ {result['error']}")
+        print("  💡 Chromeで https://libecity.com にログインしてから再実行してください。")
         return []
 
     total   = result.get("total_scanned", 0)
