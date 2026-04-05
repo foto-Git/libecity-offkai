@@ -445,10 +445,45 @@ def extract_event_info(body: str) -> dict:
             else:
                 venue = 'オフライン'
 
+    # ── 主催者名 ──────────────────────────────────────────
+    # 「主催：〇〇」「幹事：〇〇」「〇〇主催」などから抽出
+    UNKNOWN_ORGANIZER = "右の「つぶやきを見る」を押してください"
+    organizer = UNKNOWN_ORGANIZER
+
+    # 1. 「主催：」「主催者：」「幹事：」「オーガナイザー：」ラベルの後
+    m = re.search(
+        r'(?:主催者?|幹事|オーガナイザー|主宰|オーガナイザ)[：:]\s*([^\n　]{2,30})', body
+    )
+    if m:
+        organizer = m.group(1).strip()
+
+    if organizer == UNKNOWN_ORGANIZER:
+        # 2. 「〇〇主催」「〇〇さん主催」パターン
+        m = re.search(
+            r'([\u3040-\u30FF\u4E00-\u9FFFa-zA-Z][\w\u3040-\u30FF\u4E00-\u9FFF]{1,15})'
+            r'(さん)?主催',
+            body
+        )
+        if m:
+            name = m.group(1).strip()
+            suffix = m.group(2) or ""   # 元々「さん」があればそのまま、なければ付けない
+            organizer = name + suffix
+
+    if organizer == UNKNOWN_ORGANIZER:
+        # 3. 「〇〇が主催」「〇〇による」パターン
+        m = re.search(
+            r'([\u3040-\u30FF\u4E00-\u9FFFa-zA-Z][\w\u3040-\u30FF\u4E00-\u9FFF]{1,15})'
+            r'(?:が主催|が開催|による)',
+            body
+        )
+        if m:
+            organizer = m.group(1).strip()
+
     return {
         "event_name":     event_name,
         "event_datetime": event_datetime,
         "venue":          venue,
+        "organizer":      organizer,
     }
 
 
@@ -467,13 +502,13 @@ def build_html(events: List[dict], generated_at: datetime,
         body      = body_raw.replace("\n", "<br>")
         date_str  = ev.get("date") or "—"
         time_str  = ev.get("time") or ""
-        organizer = ev.get("organizer") or "—"
 
-        # つぶやき本文からオフ会情報を抽出
-        info = extract_event_info(body_raw)
+        # つぶやき本文からオフ会情報を抽出（主催者名も本文から取得）
+        info       = extract_event_info(body_raw)
         event_name = info["event_name"]
         event_dt   = info["event_datetime"]
         venue      = info["venue"]
+        organizer  = info["organizer"]
 
         tweet_link  = (f'<a href="{url}" class="tweet-link" target="_blank">🔗 つぶやきを見る</a>'
                        if url else "—")
@@ -628,13 +663,13 @@ def build_excel(events: List[dict], generated_at: datetime,
         body_raw  = ev.get("tweetBody") or ""
         date_str  = ev.get("date") or ""
         time_str  = ev.get("time") or ""
-        organizer = ev.get("organizer") or "—"
         url       = ev.get("url") or ""
 
         info       = extract_event_info(body_raw)
         event_name = info["event_name"]
         event_dt   = info["event_datetime"]
         venue      = info["venue"]
+        organizer  = info["organizer"]
 
         row_data = [
             i,
