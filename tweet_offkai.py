@@ -126,9 +126,14 @@ def make_js(start_iso: str, end_iso: str, keyword: str) -> str:
     const isOffkai = offkaiKw.some(kw => lower.includes(kw.toLowerCase()));
     if (!isOffkai) continue;
 
-    // ── ドキュメントID → つぶやきURL ──
+    // ── ドキュメントID・投稿者UID → プロフィールURL ──
+    // libecity には個別つぶやきのパーマリンクがないため、
+    // 投稿者のプロフィールページ（/user_profile/{uid}）にリンクする
     const docId     = item.document.name.split('/').pop();
-    const tweetUrl  = `https://libecity.com/mypage/tsubuyaki?id=${{docId}}`;
+    const uid       = f.uid?.stringValue || '';
+    const tweetUrl  = uid
+      ? `https://libecity.com/user_profile/${{uid}}`
+      : 'https://libecity.com/tweet/all';
 
     // ── 日時 ──
     const createdAt = new Date(f.created_at?.timestampValue);
@@ -447,7 +452,7 @@ def extract_event_info(body: str) -> dict:
 
     # ── 主催者名 ──────────────────────────────────────────
     # 「主催：〇〇」「幹事：〇〇」「〇〇主催」などから抽出
-    UNKNOWN_ORGANIZER = "右の「つぶやきを見る」を押してください"
+    UNKNOWN_ORGANIZER = "右の「投稿者のページへ」を押してください"
     organizer = UNKNOWN_ORGANIZER
 
     # 1. 「主催：」「主催者：」「幹事：」「オーガナイザー：」ラベルの後
@@ -510,7 +515,7 @@ def build_html(events: List[dict], generated_at: datetime,
         venue      = info["venue"]
         organizer  = info["organizer"]
 
-        tweet_link  = (f'<a href="{url}" class="tweet-link" target="_blank">🔗 つぶやきを見る</a>'
+        tweet_link  = (f'<a href="{url}" class="tweet-link" target="_blank">👤 投稿者のページへ</a>'
                        if url else "—")
         name_link   = (f'<a href="{url}" class="ev-link" target="_blank">{event_name}</a>'
                        if url else event_name)
@@ -590,7 +595,7 @@ a.tweet-link:hover {{ background:#ffe0b2; }}
 <div class="notice">
   ℹ️ <b>この一覧について</b><br>
   リベシティのカレンダーには登録されておらず、<b>つぶやきのみで告知されているオフ会・イベント情報</b>を収集しています。<br>
-  右端の「🔗 つぶやきを見る」ボタンから元のつぶやきを直接確認できます。<br>
+  右端の「👤 投稿者のページへ」ボタンから投稿者のプロフィールページを開き、そのつぶやきを確認できます。<br>
   ※ キーワード自動判定のため、オフ会以外の投稿が混入する場合があります。
 </div>
 <div class="summary">
@@ -606,7 +611,7 @@ a.tweet-link:hover {{ background:#ffe0b2; }}
       <th>オフ会名</th>
       <th>場所</th>
       <th>つぶやき本文</th>
-      <th>参照元</th>
+      <th>投稿者ページ</th>
       <th>投稿日時</th>
     </tr>
   </thead>
@@ -638,7 +643,7 @@ def build_excel(events: List[dict], generated_at: datetime,
 
     # ── ヘッダー行 ──
     headers = ["#", "開催日時", "開催者名", "オフ会名", "場所",
-               "つぶやき本文", "参照元URL", "投稿日時"]
+               "つぶやき本文", "投稿者ページURL", "投稿日時"]
     header_fill  = PatternFill("solid", fgColor="1A1A2E")
     header_font  = Font(bold=True, color="FFFFFF", size=10)
     center_align = Alignment(horizontal="center", vertical="top", wrap_text=False)
@@ -699,7 +704,7 @@ def build_excel(events: List[dict], generated_at: datetime,
         if url:
             link_cell = ws.cell(row=row, column=7)
             link_cell.hyperlink = url
-            link_cell.value     = "🔗 つぶやきを見る"
+            link_cell.value     = "👤 投稿者のページへ"
             link_cell.font      = Font(color="E65100", underline="single", size=10)
 
     # ── 列幅 ──
