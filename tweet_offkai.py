@@ -800,7 +800,7 @@ def main():
     unique_tweets = exclude_calendar_duplicates(tweet_events, calendar_events)
 
     # ── 開催日時の新しい順にソート（不明は最後）──────────
-    unique_tweets = sorted(unique_tweets, key=_event_datetime_sort_key, reverse=True)
+    unique_tweets = sorted(unique_tweets, key=_event_datetime_sort_key, reverse=False)
 
     if not unique_tweets:
         print("  ⚠️ カレンダー未掲載のオフ会が見つかりませんでした。")
