@@ -126,14 +126,10 @@ def make_js(start_iso: str, end_iso: str, keyword: str) -> str:
     const isOffkai = offkaiKw.some(kw => lower.includes(kw.toLowerCase()));
     if (!isOffkai) continue;
 
-    // ── ドキュメントID・投稿者UID → プロフィールURL ──
-    // libecity には個別つぶやきのパーマリンクがないため、
-    // 投稿者のプロフィールページ（/user_profile/{uid}）にリンクする
+    // ── ドキュメントID → つぶやき個別URL ──
+    // libecity の「つぶやきリンクをコピー」ボタンと同じ形式
     const docId     = item.document.name.split('/').pop();
-    const uid       = f.uid?.stringValue || '';
-    const tweetUrl  = uid
-      ? `https://libecity.com/user_profile/${{uid}}`
-      : 'https://libecity.com/tweet/all';
+    const tweetUrl  = `https://libecity.com/tweet/all?tweet_id=${{docId}}`;
 
     // ── 日時 ──
     const createdAt = new Date(f.created_at?.timestampValue);
@@ -452,7 +448,7 @@ def extract_event_info(body: str) -> dict:
 
     # ── 主催者名 ──────────────────────────────────────────
     # 「主催：〇〇」「幹事：〇〇」「〇〇主催」などから抽出
-    UNKNOWN_ORGANIZER = "右の「投稿者のページへ」を押してください"
+    UNKNOWN_ORGANIZER = "右の「つぶやきを見る」を押してください"
     organizer = UNKNOWN_ORGANIZER
 
     # 1. 「主催：」「主催者：」「幹事：」「オーガナイザー：」ラベルの後
@@ -502,11 +498,14 @@ def build_html(events: List[dict], generated_at: datetime,
     rows = ""
     for i, ev in enumerate(events, 1):
         bg        = "#f8f9ff" if i % 2 == 0 else "#ffffff"
-        url       = ev.get("url") or ""
-        body_raw  = ev.get("tweetBody") or ""
-        body      = body_raw.replace("\n", "<br>")
-        date_str  = ev.get("date") or "—"
-        time_str  = ev.get("time") or ""
+        doc_id      = ev.get("docId") or ""
+        url         = (f"https://libecity.com/tweet/all?tweet_id={doc_id}"
+                       if doc_id else ev.get("url") or "")
+        body_raw    = ev.get("tweetBody") or ""
+        body        = body_raw.replace("\n", "<br>")
+        date_str    = ev.get("date") or "—"
+        time_str    = ev.get("time") or ""
+        poster_name = ev.get("organizer") or ""   # JSON の organizer = つぶやき投稿者名
 
         # つぶやき本文からオフ会情報を抽出（主催者名も本文から取得）
         info       = extract_event_info(body_raw)
@@ -515,8 +514,9 @@ def build_html(events: List[dict], generated_at: datetime,
         venue      = info["venue"]
         organizer  = info["organizer"]
 
-        tweet_link  = (f'<a href="{url}" class="tweet-link" target="_blank">👤 投稿者のページへ</a>'
-                       if url else "—")
+        tweet_link  = (f'<span class="poster-name">{poster_name}</span><br>'
+                       f'<a href="{url}" class="tweet-link" target="_blank">🔗 つぶやきを見る</a>'
+                       if url else poster_name or "—")
         name_link   = (f'<a href="{url}" class="ev-link" target="_blank">{event_name}</a>'
                        if url else event_name)
 
@@ -524,12 +524,12 @@ def build_html(events: List[dict], generated_at: datetime,
         <tr style="background:{bg}">
           <td class="num">{i}</td>
           <td class="evdt">{event_dt}</td>
-          <td class="org">{organizer}</td>
+          <td class="dt">{date_str} {time_str}</td>
           <td class="evname">{name_link}</td>
           <td class="venue">{venue}</td>
+          <td class="org">{organizer}</td>
           <td class="body">{body}</td>
           <td class="link">{tweet_link}</td>
-          <td class="dt">{date_str} {time_str}</td>
         </tr>"""
 
     return f"""<!DOCTYPE html>
@@ -571,7 +571,8 @@ td.evname {{ font-weight:700; color:#1a1a2e; width:180px; word-break:break-all; 
 td.evdt  {{ white-space:nowrap; width:130px; color:#c05000; font-size:11px; font-weight:600; }}
 td.venue {{ width:110px; color:#166534; font-size:11px; font-weight:600; word-break:break-all; }}
 td.body  {{ font-size:10px; color:#444; line-height:1.6; word-break:break-all; }}
-td.link  {{ width:100px; text-align:center; }}
+td.link  {{ width:110px; text-align:center; }}
+.poster-name {{ display:block; font-size:10px; color:#555; margin-bottom:4px; word-break:break-all; }}
 tbody td {{ padding:7px 8px; border-bottom:1px solid #eee; vertical-align:top; }}
 tbody tr:last-child td {{ border-bottom:none; }}
 tbody tr:hover {{ background:#fff3e0 !important; }}
@@ -595,7 +596,7 @@ a.tweet-link:hover {{ background:#ffe0b2; }}
 <div class="notice">
   ℹ️ <b>この一覧について</b><br>
   リベシティのカレンダーには登録されておらず、<b>つぶやきのみで告知されているオフ会・イベント情報</b>を収集しています。<br>
-  右端の「👤 投稿者のページへ」ボタンから投稿者のプロフィールページを開き、そのつぶやきを確認できます。<br>
+  右端の「🔗 つぶやきを見る」ボタンから該当のつぶやきを直接開くことができます。<br>
   ※ キーワード自動判定のため、オフ会以外の投稿が混入する場合があります。
 </div>
 <div class="summary">
@@ -607,12 +608,12 @@ a.tweet-link:hover {{ background:#ffe0b2; }}
     <tr>
       <th class="num">#</th>
       <th>開催日時</th>
-      <th>開催者名</th>
+      <th>つぶやき日時</th>
       <th>オフ会名</th>
       <th>場所</th>
+      <th>開催者名</th>
       <th>つぶやき本文</th>
-      <th>投稿者ページ</th>
-      <th>投稿日時</th>
+      <th>つぶやきページ</th>
     </tr>
   </thead>
   <tbody>{rows}
@@ -642,8 +643,8 @@ def build_excel(events: List[dict], generated_at: datetime,
     ws.title = "つぶやきオフ会"
 
     # ── ヘッダー行 ──
-    headers = ["#", "開催日時", "開催者名", "オフ会名", "場所",
-               "つぶやき本文", "投稿者ページURL", "投稿日時"]
+    headers = ["#", "開催日時", "つぶやき日時", "オフ会名", "場所",
+               "開催者名", "つぶやき本文", "つぶやきページ"]
     header_fill  = PatternFill("solid", fgColor="1A1A2E")
     header_font  = Font(bold=True, color="FFFFFF", size=10)
     center_align = Alignment(horizontal="center", vertical="top", wrap_text=False)
@@ -665,10 +666,13 @@ def build_excel(events: List[dict], generated_at: datetime,
     name_font = Font(bold=True, color="1A1A2E", size=10)
 
     for i, ev in enumerate(events, 1):
-        body_raw  = ev.get("tweetBody") or ""
-        date_str  = ev.get("date") or ""
-        time_str  = ev.get("time") or ""
-        url       = ev.get("url") or ""
+        body_raw    = ev.get("tweetBody") or ""
+        date_str    = ev.get("date") or ""
+        time_str    = ev.get("time") or ""
+        doc_id      = ev.get("docId") or ""
+        url         = (f"https://libecity.com/tweet/all?tweet_id={doc_id}"
+                       if doc_id else ev.get("url") or "")
+        poster_name = ev.get("organizer") or ""
 
         info       = extract_event_info(body_raw)
         event_name = info["event_name"]
@@ -679,12 +683,12 @@ def build_excel(events: List[dict], generated_at: datetime,
         row_data = [
             i,
             event_dt,
-            organizer,
+            f"{date_str} {time_str}".strip(),
             event_name,
             venue,
+            organizer,
             body_raw,
             url,
-            f"{date_str} {time_str}".strip(),
         ]
         fill = even_fill if i % 2 == 0 else odd_fill
         row  = i + 1  # 1行目がヘッダー
@@ -700,15 +704,17 @@ def build_excel(events: List[dict], generated_at: datetime,
         ws.cell(row=row, column=2).font = evdt_font
         ws.cell(row=row, column=4).font = name_font
 
-        # 参照元URLにハイパーリンク
+        # つぶやきURLにハイパーリンク（列8）：投稿者名 + リンク
         if url:
-            link_cell = ws.cell(row=row, column=7)
+            link_cell = ws.cell(row=row, column=8)
             link_cell.hyperlink = url
-            link_cell.value     = "👤 投稿者のページへ"
+            display = f"{poster_name}\n🔗 つぶやきを見る" if poster_name else "🔗 つぶやきを見る"
+            link_cell.value     = display
             link_cell.font      = Font(color="E65100", underline="single", size=10)
+            link_cell.alignment = Alignment(vertical="top", wrap_text=True)
 
-    # ── 列幅 ──
-    col_widths = [4, 18, 14, 28, 14, 60, 18, 14]
+    # ── 列幅 ──  # | 開催日時 | つぶやき日時 | オフ会名 | 場所 | 開催者名 | 本文 | リンク
+    col_widths = [4, 18, 14, 28, 14, 14, 60, 14]
     for col, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(col)].width = w
 

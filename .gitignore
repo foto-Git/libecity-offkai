@@ -2,8 +2,13 @@ __pycache__/
 *.pyc
 *.pdf
 *.png
+*.jpg
+*.jpeg
 *.xlsx
 events_*.json
 events_scraped.json
+*_exclusive.json
+tweet_offkai_exclusive.json
 /tmp/
 .DS_Store
+.claude/

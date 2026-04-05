@@ -41,7 +41,7 @@ end_str   = (now + timedelta(days=31)).strftime("%Y/%m/%d")
 ```bash
 python3 -c "
 import sys, json
-sys.path.insert(0, '/Users/hiro/Documents/libecity-offkai')
+sys.path.insert(0, '$(pwd)')
 from tweet_offkai import make_js
 js = make_js('START_ISO', 'END_ISO', 'claude')
 open('/tmp/tweet_query.js', 'w').write(js)
@@ -92,7 +92,7 @@ with open('/tmp/tweet_offkai_data.json', 'w', encoding='utf-8') as f:
 ### Step 4: Pythonスクリプトで PDF / PNG を生成する
 
 ```bash
-python3 /Users/hiro/Documents/libecity-offkai/tweet_offkai.py \
+python3 tweet_offkai.py \
   --from-json /tmp/tweet_offkai_data.json \
   START_DATE END_DATE
 ```
@@ -104,8 +104,9 @@ python3 /Users/hiro/Documents/libecity-offkai/tweet_offkai.py \
 ### Step 5: 完了をユーザーに報告する
 
 生成されたファイルのパスをユーザーに伝える：
-- `~/Documents/libecity-offkai/YYMMDD_claude_つぶやきオフ会（カレンダー未掲載）.pdf`
-- `~/Documents/libecity-offkai/YYMMDD_claude_つぶやきオフ会（カレンダー未掲載）.png`
+- `./YYMMDD_claude_つぶやきオフ会（カレンダー未掲載）.pdf`
+- `./YYMMDD_claude_つぶやきオフ会（カレンダー未掲載）.png`
+- `./YYMMDD_claude_つぶやきオフ会（カレンダー未掲載）.xlsx`
 
 ---
 
@@ -121,7 +122,7 @@ python3 /Users/hiro/Documents/libecity-offkai/tweet_offkai.py \
 ### Step 3 で MCP Chrome が使えない場合のフォールバック
 直接スクリプトを実行する（Chromeが起動中でも自動でプロファイルコピーを試みる）：
 ```bash
-python3 /Users/hiro/Documents/libecity-offkai/tweet_offkai.py START_DATE END_DATE
+python3 tweet_offkai.py START_DATE END_DATE
 ```
 
 ---
@@ -163,10 +164,11 @@ playwright install chromium
 ### つぶやきURL形式
 
 ```
-https://libecity.com/mypage/tsubuyaki?id={docId}
+https://libecity.com/tweet/all?tweet_id={docId}
 ```
 
-`docId` は Firestore ドキュメント名の末尾セグメント（`item.document.name.split('/').pop()`）
+`docId` は Firestore ドキュメント名の末尾セグメント（`item.document.name.split('/').pop()`）。
+libecity の「つぶやきリンクをコピー」ボタンと同じ形式。
 
 ### tweet_offkai.py の使い方
 
