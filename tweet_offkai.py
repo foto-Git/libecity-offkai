@@ -297,6 +297,54 @@ def exclude_calendar_duplicates(tweet_events: list, calendar_events: list) -> li
 
 
 # ─────────────────────────────────────────────────────────
+# 開催日時を比較可能なタプルに変換（ソートキー用）
+# ─────────────────────────────────────────────────────────
+def _event_datetime_sort_key(ev: dict) -> tuple:
+    """
+    開催日時文字列を (year, month, day, hour, minute) タプルに変換。
+    不明・解析不能は (9999, 99, 99, 99, 99) にして最後へ。
+    """
+    body_raw = ev.get("tweetBody") or ""
+    dt_str   = extract_event_info(body_raw)["event_datetime"]
+
+    if dt_str == "不明":
+        return (9999, 99, 99, 99, 99)
+
+    now  = datetime.now()
+    year = now.year
+
+    # 西暦が明示されていれば上書き
+    m = re.search(r'(\d{4})年', dt_str)
+    if m:
+        year = int(m.group(1))
+
+    # 月・日
+    month = day = 0
+    m = re.search(r'(\d{1,2})月(\d{1,2})日', dt_str)
+    if m:
+        month, day = int(m.group(1)), int(m.group(2))
+    else:
+        m = re.search(r'(\d{1,2})/(\d{1,2})', dt_str)
+        if m:
+            month, day = int(m.group(1)), int(m.group(2))
+
+    if month == 0:          # 月日が読み取れなかった
+        return (9998, 0, 0, 0, 0)
+
+    # 時・分
+    hour = minute = 0
+    m = re.search(r'(\d{1,2})[時:：](\d{2})', dt_str)
+    if m:
+        hour, minute = int(m.group(1)), int(m.group(2))
+    else:
+        m = re.search(r'(\d{1,2})時', dt_str)
+        if m:
+            hour = int(m.group(1))
+
+    return (year, month, day, hour, minute)
+
+
+# ─────────────────────────────────────────────────────────
 # つぶやき本文からオフ会情報を推測抽出
 # ─────────────────────────────────────────────────────────
 def extract_event_info(body: str) -> dict:
@@ -750,6 +798,9 @@ def main():
         print("  ℹ️ events.json が見つかりません。重複除外をスキップします。")
 
     unique_tweets = exclude_calendar_duplicates(tweet_events, calendar_events)
+
+    # ── 開催日時の新しい順にソート（不明は最後）──────────
+    unique_tweets = sorted(unique_tweets, key=_event_datetime_sort_key, reverse=True)
 
     if not unique_tweets:
         print("  ⚠️ カレンダー未掲載のオフ会が見つかりませんでした。")
